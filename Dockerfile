@@ -1,35 +1,51 @@
-# Use an official OpenJDK runtime as a parent image for building the application
-FROM eclipse-temurin:17-jdk-jammy as builder
+# Multi-stage build for production
+FROM maven:3.9.6-eclipse-temurin-17-alpine AS build
 
-# Set the working directory in the container
+# Set working directory
 WORKDIR /app
 
-# Copy the Maven wrapper and the POM file to leverage Docker's build cache
-COPY .mvn/ .mvn
-COPY mvnw pom.xml ./
+# Copy pom.xml and download dependencies
+COPY pom.xml .
+RUN mvn dependency:go-offline -B
 
-# Download dependencies
-RUN ./mvnw dependency:go-offline
-
-# Copy the project source code
+# Copy source code
 COPY src ./src
 
-# Package the application, skipping tests
-RUN ./mvnw package -DskipTests
+# Build the application
+RUN mvn clean package -DskipTests
 
-# --- Second Stage: Create the final, smaller image ---
+# Production stage
+FROM eclipse-temurin:17-jre-alpine AS production
 
-# Use a smaller JRE image for the final application image
-FROM eclipse-temurin:17-jre-jammy
+# Create non-root user for security
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
 
-# Set the working directory
+# Install necessary packages
+RUN apk add --no-cache curl
+
+# Set working directory
 WORKDIR /app
 
-# Copy the packaged JAR from the builder stage
-COPY --from=builder /app/target/ClipNest-0.0.1-SNAPSHOT.jar app.jar
+# Copy the built JAR from build stage
+COPY --from=build /app/target/musike-backend-0.0.1-SNAPSHOT.jar app.jar
 
-# Expose the port the app runs on
+# Create logs directory
+RUN mkdir -p /app/logs && \
+    chown -R appuser:appgroup /app
+
+# Switch to non-root user
+USER appuser
+
+# Expose port
 EXPOSE 8080
 
-# Command to run the application
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/actuator/health || exit 1
+
+# JVM options for production
+ENV JAVA_OPTS="-Xms512m -Xmx1024m -XX:+UseG1GC -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+
+# Run the application
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
