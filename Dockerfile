@@ -28,7 +28,7 @@ RUN apk add --no-cache curl
 WORKDIR /app
 
 # Copy the built JAR from build stage
-COPY --from=build /app/target/musike-backend-0.0.1-SNAPSHOT.jar app.jar
+COPY --from=build /app/target/ClipNest-0.0.1-SNAPSHOT.jar app.jar
 
 # Create logs directory
 RUN mkdir -p /app/logs && \
